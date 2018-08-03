@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'/>
+    <title>DLS - A dynamic labeling system for buildings</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no'/>
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.46.0/mapbox-gl.js'></script>
+    <script src='https://api.tiles.mapbox.com/mapbox.js/plugins/turf/v3.0.11/turf.min.js'></script>
+    <script src='https://code.jquery.com/jquery-3.2.1.min.js'></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js'></script>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/exporting.js"></script>
+    <script src="https://code.highcharts.com/modules/export-data.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+
+    <link rel='stylesheet' href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.46.0/mapbox-gl.css' type='text/css'/>
+    <link rel='stylesheet' href='https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.0.9/mapbox-gl-draw.css' type='text/css'/>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+</head>
+
+<body style="height: 100%; margin: 0">
+<!--
+ <style>
+        #map {
+            position: absolute;
+            top: 4%;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
+-->
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light">
+  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavDropdown" aria-controls="navbarNavDropdown" aria-expanded="false" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+  <div class="collapse navbar-collapse" id="navbarNavDropdown">
+    <ul class="navbar-nav">
+      <li class="nav-item dropdown active">
+        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownMenuLink" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+          Analysis
+        </a>
+        <div class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
+            {% for neigh in neighs %}
+             <a class="dropdown-item" href="javascript:viewPattern('{{ neigh }}')">{{ neigh }}</a>
+         {% endfor %}
+             <div class="dropdown-divider"></div>
+              <a class="dropdown-item" href="/pattern/clustering">Online clustering</a>
+        </div>
+      </li>
+
+      <li class="nav-item">
+        <a class="nav-link" href="/">Create Neighborhoods</a>
+      </li>
+
+    </ul>
+  </div>
+</nav>
+
+
+<div class="row">
+    <div class="col-md-12">
+        <div id='map' style="height: 540px"></div>
+    </div>
+</div>
+<div class="row">
+    <div class="col-md-12">
+        <div id='chart' style="height: 100%"></div>
+    </div>
+</div>
+</div>
+<script type="text/javascript">
+    mapboxgl.accessToken = 'pk.eyJ1IjoiYWZhbmN5IiwiYSI6ImNqaXFob2FwejAwdnYzcHFpaDJydzY0c3UifQ.aCQ2fGpSed-QsWEvyOITaA';
+    /* eslint-disable */
+    var map = new mapboxgl.Map({
+        container: 'map', // container id
+        style: 'mapbox://styles/mapbox/satellite-v9', //hosted style id
+        center: [-83.09773775937, 42.238752738209], // starting position
+        zoom: 15 // starting zoom
+    });
+
+    var nav = new mapboxgl.NavigationControl();
+    map.addControl(nav, 'top-right');
+
+    var geoLoc = new mapboxgl.GeolocateControl({
+        positionOptions: {
+            enableHighAccuracy: true
+        },
+        trackUserLocation: true
+    });
+    map.addControl(geoLoc);
+
+
+    map.on('load', function () {
+        map.addSource('ds_households', {
+            "type": "geojson",
+            "data": {{ households | safe }}
+        });
+
+        map.addLayer({
+            "id": "l_households",
+            "source": "ds_households",
+            "type": "circle",
+            'paint': {
+                // make circles larger as the user zooms from z12 to z22
+                'circle-radius': {
+                    'base': 1.75,
+                    'stops': [[12, 2], [22, 180]]
+                },
+                // color circles by ethnicity, using a match expression
+                // https://www.mapbox.com/mapbox-gl-js/style-spec/#expressions-match
+                'circle-color': '#fbb03b'
+            }
+        });
+
+        map.addSource('ds_neighs', {
+            "type": "geojson",
+            "data": {
+                "type": "FeatureCollection",
+                "features": []
+            }
+        });
+
+        map.addLayer({
+                        'id': 'l_neighs',
+                        'source': 'ds_neighs',
+                        'type': 'fill',
+                        'paint': {
+                            'fill-color': { "type": "identity",
+                                            "property": "fill"},
+                            'fill-opacity': { "type": "identity",
+                                            "property": "opacity"}
+                        }
+                    });
+    });
+
+
+    function viewPattern(neigh) {
+        if (neigh != '') {
+            $.ajax({
+                type: 'POST',
+                url: '/pattern/neigh/avg',
+                data: JSON.stringify({'name': neigh}),
+                contentType: 'application/json',
+                success: function (data) {
+                   map.getSource("ds_neighs").setData(data['featureCollections']);
+                   Highcharts.chart('chart', {
+                          chart: {
+                            zoomType: 'x'
+                          },
+                          title: {
+                            text: 'Average daily electricity consumption pattern'
+                          },
+                          subtitle: {
+                            text: document.ontouchstart === undefined ?
+                                'Click and drag in the plot area to zoom in' : 'Pinch the chart to zoom in'
+                          },
+                          xAxis: {
+                            type: 'String',
+                              title:{
+                                text: 'Hour of the day'
+                              }
+
+                          },
+                          yAxis: {
+                            title: {
+                              text: 'kWh'
+                            }
+                          },
+                          legend: {
+                            enabled: false
+                          },
+                          plotOptions: {
+
+                          },
+                           tooltip: {
+                                formatter: function() {
+                                    return  '<b>Consumption:</b><br/>'
+                                            +  this.y + 'kWh at '+ this.x;
+                                }
+                            },
+                          series: data['series']
+                   });
+                }
+            });
+        }
+    };
+</script>
+</body>
+</html>
